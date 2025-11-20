@@ -1,0 +1,260 @@
+---
+title: "Class12: RNASeq Analysis"
+author: "Dani Weatherwax (PID: A17856408)"
+format: pdf
+toc: true
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+
+##Background
+Today we will analyze some RNASeq data from Himes et al. on the effects of a common steroid on airway smooth muscle cells (ASM cells).
+Our starting pointis the "counts" data and "metadata" that contain the count values for each gene in their different experiements (i.e. cell lines iwth or without the drug)
+
+##Data import
+
+
+```{r}
+
+counts <- read.csv("~/Downloads/airway_scaledcounts.csv", row.names = 1)
+
+metadata <- read.csv("~/Downloads/airway_metadata.csv")
+
+```
+
+
+
+
+```{r}
+nrow(counts)
+```
+
+>Q1. How many different genes(columns in counts or rows in metadata) are there?
+>There are 38,694 genes.
+
+```{r}
+sum(metadata$dex=="control")
+```
+
+>Q2. How many different 'control' cell lines do we have?
+4
+
+```{r}
+library(dplyr)
+control <- metadata %>% filter(dex=="control")
+control.counts <- counts %>% select(control$id) 
+control.mean <- rowMeans(control.counts)
+head(control.mean)
+```
+
+
+```{r}
+library(dplyr)
+treated <- metadata %>% filter(dex=="treated")
+treated.counts <- counts %>% select(treated$id) 
+treated.mean <- rowMeans(treated.counts)
+head(treated.mean)
+```
+>Q3. You could change the divide by four into a "mean" function so that you don't have to correct if more data points are added.
+
+
+
+
+1. Extract all "control" columns from the 'counts' object
+2. Calculate the mean across all control genes
+3-4. Do the same for "treated"
+5. Compare these 'control.mean' and 'treated.mean' values.
+6. Store these together for ease of bookkeeping
+
+```{r}
+meancounts <- data.frame(control.mean, treated.mean)
+head(meancounts)
+```
+>Q5b. You would use geom_point to create a scatter plot.
+
+>Q6. You add scale_x_log10() and scale_y_log10().
+```{r}
+library(ggplot2)
+ggplot(meancounts, aes(control.mean, treated.mean))+
+  geom_point()+
+scale_x_log10()+
+scale_y_log10()
+```
+
+Let's calculate the log2 fold change for our treated over control mean counts.
+
+```{r}
+meancounts$log2fc <- log2(meancounts$treated.mean/meancounts$control.mean)
+```
+
+```{r}
+head(meancounts)
+```
+
+A common "rule of thumb" is a log2 fold change cutoff of +2 and -2 and to call genes "up regulated" or "down regulated"
+
+```{r}
+sum(meancounts$log2fc>=2, na.rm=TRUE)
+```
+
+```{r}
+sum(meancounts$log2fc<=-2, na.rm=TRUE)
+```
+>Q8. We have 1910 upregulated genes >2.
+
+>Q9. We have 2330 downregulated genes >2.
+
+>Q10. We don't know if these results are statistically significant or not.
+
+
+
+Let's do this analysis properly and keep our inner stats nerd happy- i.e. are the differences we see between drug and no drug significant given the replicate experiments?
+
+```{r, message=FALSE}
+library(DESeq2)
+```
+
+For DESeq analysis we need 3 things:
+- Count values (`countdata`)
+-metadata telling us about in columns in `countdata`(`coldata`)
+-design of the experiment (i.e. what do you want to compare)
+
+Our first function from DESeq2 will setup the input required for analysis by storing all these 3 things together.
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=counts, 
+                              colData=metadata, 
+                              design=~dex)
+```
+
+
+
+```{r}
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds)
+```
+
+
+##Volcano Plot
+
+This is a common summary results figure from these types of experiments and plot the log2 fold-change vs. the adjusted p-value. 
+
+
+```{r}
+plot(res$log2FoldChange, -log(res$padj))
+abline(v=c(-2,2), col="red")
+abline(h=-log(0.05), col="red")
+```
+
+
+```{r}
+write.csv(res,file="my_results.csv")
+```
+
+
+##Add gene annotation
+
+To help make sense of our results and communicate them to other folks, we need to add some more annotation to our main `res` object.
+
+We will use two bioconductor packages to first map IDs to different formats including the classic gene "symbol" gene name.
+
+
+
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+```
+```{r}
+columns(org.Hs.eg.db)
+```
+
+We can translate or "map" IDs between any of these 26 databases using the `mapIds()` function.
+
+```{r}
+res$symbol <- mapIds(keys= row.names(res), #our current IDs
+       keytype="ENSEMBL", #the format of our IDS
+       x=org.Hs.eg.db, #where to get the mappings from
+       column="SYMBOL" #the format/DB to map to
+       )
+
+head(res)
+```
+
+
+
+Add the mappings for "GENENAME" and "ENTREZID" and store as `res$genename` and `res$entrez`
+
+```{r}
+res$genename <- mapIds(keys= row.names(res), #our current IDs
+       keytype="ENSEMBL", #the format of our IDS
+       x=org.Hs.eg.db, #where to get the mappings from
+       column="GENENAME" #the format/DB to map to
+       )
+```
+
+
+```{r}
+res$entrez <- mapIds(keys= row.names(res), #our current IDs
+       keytype="ENSEMBL", #the format of our IDS
+       x=org.Hs.eg.db, #where to get the mappings from
+       column="ENTREZID" #the format/DB to map to
+       )
+```
+
+
+##Pathway Analysis
+
+There are lots of bioconductor packages to do this type of analysis;for now, let's just try one called **gage** again we need to install this if we don't have it already.
+
+
+```{r}
+library(gage)
+library(gageData)
+library(pathview)
+```
+
+
+
+```{r}
+foldchanges <- res$log2FoldChange
+names(foldchanges) <- res$entrez
+head(foldchanges)
+```
+
+```{r}
+data(kegg.sets.hs)
+keggres<- gage(foldchanges, gsets=kegg.sets.hs)
+```
+
+
+```{r}
+attributes(keggres)
+```
+
+
+```{r}
+head(keggres$less, 5)
+```
+
+Let's look at one of these pathways with our genes colored up so we can see the overlap
+
+```{r}
+pathview(pathway.id="hsa05130", gene.data=foldchanges)
+```
+
+Add this pathway figure to our lab report
+
+![](hsa05130.pathview.png)
+##Save our main results
+
+```{r}
+write.csv(res,file="myresults_annotated.csv")
+```
+
+
