@@ -2,9 +2,8 @@
 
 This repo is for my UCSD bioinformatics class. 
 
-- Class 04 [R Fundamentals]()  
 - Class 05 [Data Visualization with ggplot](class05.1.md)  
-- Class 06 [Writing R Functions]()   
+- Class 06 [Writing R Functions](Class06.pdf)   
 - Class 07 [Machine Learning 1](Class07.md)  
 - Class 08 [Mini-Project](Class08.md)  
 - Class 09 [Structural Bioinformatics](Class09.html)  
